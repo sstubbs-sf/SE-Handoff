@@ -51,6 +51,27 @@ unzip snowcup-deploy.zip -d ~/.snowflake/cortex/skills/
 > `node_modules/` out. **Keep that repository private: the folder contains the
 > answer key.**
 
+### Already running an earlier version of this lab? Do this first
+
+Older versions set `DEFAULT_SECONDARY_ROLES = ()` on every learner. The lab no
+longer manages that property, and `snowcup-data-setup.sql` now drops the column
+that held the original values — so if you deploy straight over an older install,
+any learner still sitting at `()` stays there permanently and the record of what
+they had is gone. Nothing errors; it is silent.
+
+One read-only script tells you whether this applies to you:
+
+```bash
+snow sql -c <your-connection> --role ACCOUNTADMIN -f verify/preflight_secondary_roles.sql
+```
+
+- `NOTHING TO MIGRATE` — fresh or already-migrated account. Deploy normally.
+- `RESTORE BEFORE DEPLOYING` — it lists each affected learner and prints the exact
+  `ALTER USER` to run. Review them, run them, then deploy.
+
+Skip this entirely if you are deploying into an account that has never had the
+lab on it.
+
 ## 3. Deploy — paste this one prompt
 
 Fill in the two blanks and send it:
@@ -61,6 +82,10 @@ snowcup-deploy skill.
 
 My snow CLI connection is: <YOUR-CONNECTION-NAME>
 Provision these learners: <email@company.com, ANOTHER_USER, ...>
+
+If this account already has an earlier version of the lab on it, first run
+verify/preflight_secondary_roles.sql and stop to show me the result before
+changing anything.
 
 Run the full deployment including both apps. Stop at the first failed gate
 rather than continuing. When it finishes, give me the learner hand-off
@@ -224,11 +249,43 @@ Five tabs:
 | **Add learners** | Paste names or emails, comma separated. Either a Snowflake username or an email address works. Idempotent, so re-running is safe — and re-running is the repair path when someone reports an empty schema, because it hands ownership of anything in their build schema back to their own role. |
 | **Roster** | Who is provisioned, their role, and their build schema. Check this before learners arrive: a missing row means they cannot start. |
 | **Remove** | Offboarding. Revoking the role is the default and keeps their work. Ticking **also drop their build schema** deletes everything they built and additionally requires typing `REMOVE` — it is the only destructive action in the whole console. |
-| **Lab progress** | Per learner per training: checkpoints ticked, challenge answers correct, quiz answers correct, challenge points out of the possible 120, and whether they are complete. This is what you watch during the session to spot someone stalled. There is no separate leaderboard tab — for a ranked view query `SNOWCUP_WORKSHOP.GRADING.LEADERBOARD`. |
+| **Lab progress** | Per learner per training: checkpoints ticked, challenge answers correct, quiz answers correct, challenge points out of the possible 120, and whether they are complete. This is what you watch during the session to spot someone stalled. There is no separate leaderboard tab — for a ranked view query `SNOWCUP_WORKSHOP.GRADING.LEADERBOARD`. Each row also has a **Reset scores** button (see below). |
 | **Environment health** | The same invariants the deploy gates check, re-checked live: shared data loaded, answer key intact, every role paired with a schema, trainings registered, and **learners own their own work**. If that last one reports a problem it lists each object and offers **Repair ownership**. |
 
-Two things worth knowing about the health tab:
+### Resetting one learner's scores
 
+Each row in **Lab progress** has a **Reset scores** button (two-step: click, then
+confirm). Use it when someone wants to re-run the lab, or to clear yourself after a
+rehearsal so you do not sit at the top of the leaderboard.
+
+It clears, **for that learner and that training only**:
+
+- every checkpoint they ticked
+- every reinforcement quiz answer
+- every challenge answer and the points from them
+- the completion stamp
+
+It deliberately does **not** touch:
+
+- **anything they built** — their semantic view, agent, Cortex Search service, views
+  and procedures are their *work*, not their score. A reset never destroys that.
+- their role, build schema, or user defaults. That is offboarding, which is the
+  removal section of the **Roster** tab.
+- their visit history. First-seen, last-seen and visit count survive, so you can
+  still see they had engaged. Note the status column will read `not started`
+  regardless, because status is derived from progress rather than visits.
+
+Scoped to one row on purpose: once a second training is registered, a
+reset-everything button would wipe work you may not have meant to touch. Re-running
+it on an already-clear learner reports "nothing to do" rather than failing.
+
+The equivalent from a worksheet:
+
+```sql
+CALL SNOWCUP_WORKSHOP.ADMIN.RESET_LEARNER_PROGRESS('<learner>', 'SNOWCUP');
+```
+
+Two things worth knowing about the health tab:
 - "Learners own their own work" failing with *could not run `ADMIN.AUDIT_BUILD_OWNERSHIP`*
   means ownership is **unverified, not broken**. Re-run `assets/snowcup-data-setup.sql`
   (idempotent) and reload.
